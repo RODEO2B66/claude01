@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOID RUNNER - 2D Dodge Game</title>
+  <style>
+    /* ===== グローバルリセット & 基本スタイル ===== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: #020b18;
+      color: #00ffcc;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ===== タイトル ===== */
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.3em;
+      text-shadow: 0 0 10px #00ffcc, 0 0 30px #00ffcc;
+      margin-bottom: 8px;
+    }
+
+    /* ===== スコア表示 ===== */
+    #hud {
+      display: flex;
+      gap: 40px;
+      margin-bottom: 12px;
+      font-size: 1rem;
+      letter-spacing: 0.15em;
+    }
+
+    #hud span {
+      text-shadow: 0 0 6px #00ffcc;
+    }
+
+    /* ===== ゲームキャンバス ===== */
+    #gameCanvas {
+      border: 2px solid #00ffcc;
+      box-shadow: 0 0 20px #00ffcc55, 0 0 60px #00ffcc22;
+      background-color: #020b18;
+      display: block;
+    }
+
+    /* ===== オーバーレイ（スタート／ゲームオーバー画面）===== */
+    #overlay {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    #overlay h2 {
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      text-shadow: 0 0 15px #ff004c, 0 0 40px #ff004c;
+      color: #ff004c;
+    }
+
+    #overlay p {
+      font-size: 1rem;
+      letter-spacing: 0.1em;
+      color: #aaffee;
+      text-shadow: 0 0 6px #00ffcc;
+    }
+
+    #overlay button {
+      margin-top: 10px;
+      padding: 12px 40px;
+      background: transparent;
+      border: 2px solid #00ffcc;
+      color: #00ffcc;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 1.1rem;
+      letter-spacing: 0.2em;
+      cursor: pointer;
+      text-shadow: 0 0 6px #00ffcc;
+      box-shadow: 0 0 12px #00ffcc55;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+
+    #overlay button:hover {
+      background: #00ffcc22;
+      box-shadow: 0 0 24px #00ffccaa;
+    }
+
+    /* hidden クラスで非表示にする */
+    .hidden {
+      display: none !important;
+    }
+
+    /* ===== 操作説明 ===== */
+    #instructions {
+      margin-top: 12px;
+      font-size: 0.78rem;
+      color: #447766;
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>⚡ VOID RUNNER ⚡</h1>
+
+  <!-- スコア / ハイスコア 表示エリア -->
+  <div id="hud">
+    <span>SCORE: <span id="scoreDisplay">0</span></span>
+    <span>BEST: <span id="bestDisplay">0</span></span>
+  </div>
+
+  <!-- メインゲームキャンバス -->
+  <canvas id="gameCanvas" width="600" height="500"></canvas>
+
+  <!-- スタート／ゲームオーバー用オーバーレイ -->
+  <div id="overlay">
+    <h2 id="overlayTitle">VOID RUNNER</h2>
+    <p id="overlayMessage">WASDキーで移動して敵を避けろ！</p>
+    <p id="finalScore" class="hidden"></p>
+    <button id="startBtn" onclick="startGame()">[ START ]</button>
+  </div>
+
+  <p id="instructions">WASD: 移動 &nbsp;|&nbsp; 敵（赤）に当たるとゲームオーバー</p>
+
+  <script>
+    // ============================================================
+    //  定数・設定
+    // ============================================================
+
+    const CANVAS_W = 600;      // キャンバス幅（px）
+    const CANVAS_H = 500;      // キャンバス高さ（px）
+    const PLAYER_SIZE = 16;    // プレイヤーの半幅（正方形）
+    const PLAYER_SPEED = 3;    // プレイヤーの移動速度（px/フレーム）
+    const ENEMY_SIZE = 14;     // 敵の半幅
+    const ENEMY_BASE_SPEED = 1.5; // 敵の基本速度
+    const ENEMY_SPAWN_INTERVAL = 90; // 何フレームごとに敵が増えるか
+    const MAX_ENEMIES = 30;    // 同時に存在できる最大敵数
+
+    // ============================================================
+    //  変数
+    // ============================================================
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx    = canvas.getContext('2d');
+
+    // プレイヤーオブジェクト
+    let player = {};
+
+    // 敵の配列
+    let enemies = [];
+
+    // ゲーム状態
+    let score      = 0;
+    let bestScore  = 0;
+    let frameCount = 0;       // 経過フレーム数
+    let gameRunning = false;  // ゲーム実行中フラグ
+    let animId     = null;    // requestAnimationFrame の ID
+
+    // キー入力の状態（押されていれば true）
+    const keys = {
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+    };
+
+    // ============================================================
+    //  キーボードイベント
+    // ============================================================
+
+    // キーを押したとき
+    document.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      if (k in keys) keys[k] = true;
+    });
+
+    // キーを離したとき
+    document.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      if (k in keys) keys[k] = false;
+    });
+
+    // ============================================================
+    //  ゲーム初期化
+    // ============================================================
+
+    function startGame() {
+      // オーバーレイを隠す
+      document.getElementById('overlay').classList.add('hidden');
+
+      // プレイヤーを画面中央に配置
+      player = {
+        x: CANVAS_W / 2,
+        y: CANVAS_H / 2,
+      };
+
+      // 状態リセット
+      enemies    = [];
+      score      = 0;
+      frameCount = 0;
+      gameRunning = true;
+
+      // HUD 更新
+      updateHUD();
+
+      // 前のループがあればキャンセル
+      if (animId) cancelAnimationFrame(animId);
+
+      // ゲームループ開始
+      gameLoop();
+    }
+
+    // ============================================================
+    //  敵の生成
+    // ============================================================
+
+    function spawnEnemy() {
+      // 敵は画面外4辺のいずれかからランダムにスポーン
+      const side = Math.floor(Math.random() * 4); // 0=上, 1=右, 2=下, 3=左
+      let ex, ey;
+
+      if (side === 0) { ex = Math.random() * CANVAS_W; ey = -ENEMY_SIZE; }
+      else if (side === 1) { ex = CANVAS_W + ENEMY_SIZE; ey = Math.random() * CANVAS_H; }
+      else if (side === 2) { ex = Math.random() * CANVAS_W; ey = CANVAS_H + ENEMY_SIZE; }
+      else                 { ex = -ENEMY_SIZE;              ey = Math.random() * CANVAS_H; }
+
+      // 速度は基本速度 ± ランダムなバラつき＋スコアに応じた加速
+      const speedBonus = Math.min(score / 300, 2.5); // スコアが上がると少し速くなる
+      const speed = ENEMY_BASE_SPEED + speedBonus + (Math.random() - 0.5) * 0.8;
+
+      // プレイヤーの方向を向かせる
+      const angle = Math.atan2(player.y - ey, player.x - ex);
+
+      enemies.push({
+        x: ex,
+        y: ey,
+        vx: Math.cos(angle) * speed,  // X方向速度
+        vy: Math.sin(angle) * speed,  // Y方向速度
+      });
+    }
+
+    // ============================================================
+    //  衝突判定（AABB: 軸平行バウンディングボックス）
+    // ============================================================
+
+    function checkCollision(a, aSize, b, bSize) {
+      return (
+        Math.abs(a.x - b.x) < aSize + bSize &&
+        Math.abs(a.y - b.y) < aSize + bSize
+      );
+    }
+
+    // ============================================================
+    //  プレイヤーの更新
+    // ============================================================
+
+    function updatePlayer() {
+      // WASDキーに応じて移動
+      if (keys.w) player.y -= PLAYER_SPEED;
+      if (keys.s) player.y += PLAYER_SPEED;
+      if (keys.a) player.x -= PLAYER_SPEED;
+      if (keys.d) player.x += PLAYER_SPEED;
+
+      // 画面外に出ないようにクランプ
+      player.x = Math.max(PLAYER_SIZE, Math.min(CANVAS_W - PLAYER_SIZE, player.x));
+      player.y = Math.max(PLAYER_SIZE, Math.min(CANVAS_H - PLAYER_SIZE, player.y));
+    }
+
+    // ============================================================
+    //  敵の更新
+    // ============================================================
+
+    function updateEnemies() {
+      for (const e of enemies) {
+        e.x += e.vx;
+        e.y += e.vy;
+      }
+
+      // 画面から大きく外れた敵を削除（メモリ節約）
+      const margin = 100;
+      enemies = enemies.filter(
+        e => e.x > -margin && e.x < CANVAS_W + margin &&
+             e.y > -margin && e.y < CANVAS_H + margin
+      );
+    }
+
+    // ============================================================
+    //  描画処理
+    // ============================================================
+
+    function draw() {
+      // 背景（グリッドつきSF風）
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.fillStyle = '#020b18';
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+      // グリッドライン（薄く）
+      ctx.strokeStyle = '#0a2030';
+      ctx.lineWidth = 1;
+      const gridStep = 40;
+      for (let x = 0; x < CANVAS_W; x += gridStep) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, CANVAS_H);
+        ctx.stroke();
+      }
+      for (let y = 0; y < CANVAS_H; y += gridStep) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(CANVAS_W, y);
+        ctx.stroke();
+      }
+
+      // ===== 敵を描画 =====
+      for (const e of enemies) {
+        // 外枠（グロー風）
+        ctx.shadowColor = '#ff004c';
+        ctx.shadowBlur  = 12;
+        ctx.fillStyle   = '#ff004c';
+        ctx.fillRect(e.x - ENEMY_SIZE, e.y - ENEMY_SIZE, ENEMY_SIZE * 2, ENEMY_SIZE * 2);
+
+        // 内側（明るいコア）
+        ctx.shadowBlur = 0;
+        ctx.fillStyle  = '#ff88aa';
+        ctx.fillRect(e.x - ENEMY_SIZE / 2, e.y - ENEMY_SIZE / 2, ENEMY_SIZE, ENEMY_SIZE);
+      }
+
+      // ===== プレイヤーを描画 =====
+      ctx.shadowColor = '#00ffcc';
+      ctx.shadowBlur  = 20;
+      ctx.fillStyle   = '#00ffcc';
+      ctx.fillRect(
+        player.x - PLAYER_SIZE,
+        player.y - PLAYER_SIZE,
+        PLAYER_SIZE * 2,
+        PLAYER_SIZE * 2
+      );
+
+      // プレイヤーの内側（明るいコア）
+      ctx.shadowBlur = 0;
+      ctx.fillStyle  = '#ffffff';
+      ctx.fillRect(
+        player.x - PLAYER_SIZE / 2,
+        player.y - PLAYER_SIZE / 2,
+        PLAYER_SIZE,
+        PLAYER_SIZE
+      );
+
+      // シャドウをリセット
+      ctx.shadowBlur = 0;
+    }
+
+    // ============================================================
+    //  HUD（スコア表示）更新
+    // ============================================================
+
+    function updateHUD() {
+      document.getElementById('scoreDisplay').textContent = score;
+      document.getElementById('bestDisplay').textContent  = bestScore;
+    }
+
+    // ============================================================
+    //  ゲームオーバー処理
+    // ============================================================
+
+    function gameOver() {
+      gameRunning = false;
+      cancelAnimationFrame(animId);
+
+      // ハイスコア更新
+      if (score > bestScore) bestScore = score;
+      updateHUD();
+
+      // オーバーレイを表示
+      document.getElementById('overlayTitle').textContent   = '- GAME OVER -';
+      document.getElementById('overlayMessage').textContent = '敵に当たってしまった...';
+      document.getElementById('finalScore').textContent     = `SCORE: ${score}`;
+      document.getElementById('finalScore').classList.remove('hidden');
+      document.getElementById('startBtn').textContent       = '[ RETRY ]';
+      document.getElementById('overlay').classList.remove('hidden');
+    }
+
+    // ============================================================
+    //  メインゲームループ
+    // ============================================================
+
+    function gameLoop() {
+      if (!gameRunning) return;
+
+      frameCount++;
+
+      // ---- プレイヤー移動 ----
+      updatePlayer();
+
+      // ---- 敵のスポーン ----
+      // ENEMY_SPAWN_INTERVAL フレームごとに1体追加（最大数まで）
+      if (frameCount % ENEMY_SPAWN_INTERVAL === 0 && enemies.length < MAX_ENEMIES) {
+        spawnEnemy();
+      }
+
+      // ---- 敵の移動 ----
+      updateEnemies();
+
+      // ---- 衝突判定 ----
+      for (const e of enemies) {
+        if (checkCollision(player, PLAYER_SIZE, e, ENEMY_SIZE)) {
+          gameOver();
+          return; // ゲームオーバーなのでループを終了
+        }
+      }
+
+      // ---- スコア加算（生存フレーム数÷3） ----
+      score = Math.floor(frameCount / 3);
+      updateHUD();
+
+      // ---- 描画 ----
+      draw();
+
+      // ---- 次フレームへ ----
+      animId = requestAnimationFrame(gameLoop);
+    }
+
+    // ============================================================
+    //  初期描画（タイトル画面用）
+    // ============================================================
+    (function initialDraw() {
+      ctx.fillStyle = '#020b18';
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      // グリッドだけ描いておく
+      ctx.strokeStyle = '#0a2030';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < CANVAS_W; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
+      }
+      for (let y = 0; y < CANVAS_H; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
+      }
+    })();
+
+  </script>
+</body>
+</html>
