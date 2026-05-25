@@ -2,19 +2,11 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <!--
-    iOS Safari では viewport の設定が特に重要。
-    user-scalable=no でピンチズームを防ぎ、
-    viewport-fit=cover でノッチ付き端末にも対応する。
-  -->
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <!-- iOS ホーム画面追加時にフルスクリーン動作させる -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>VOID RUNNER - 2D Dodge Game</title>
+  <title>Dino Runner</title>
   <style>
-    /* ===== グローバルリセット & 基本スタイル ===== */
     * {
       margin: 0;
       padding: 0;
@@ -24,569 +16,695 @@
       user-select: none;
     }
 
-    html {
-      /* iOS Safari では 100vh がアドレスバー分ずれるので height:100% を使う */
+    html, body {
       height: 100%;
-    }
-
-    body {
-      background-color: #020b18;
-      color: #00ffcc;
+      background: #f7f7f7;
       font-family: 'Courier New', Courier, monospace;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      /* iOS ノッチ対応の安全領域 */
-      padding-top: env(safe-area-inset-top, 8px);
-      padding-bottom: env(safe-area-inset-bottom, 8px);
-      /* スクロールは body でのみ制御（overflow: hidden を html に入れない） */
       overflow: hidden;
-      /* iOS Safari でのバウンススクロール防止 */
       overscroll-behavior: none;
     }
 
-    /* ===== タイトル ===== */
-    h1 {
-      font-size: clamp(1rem, 5vw, 1.8rem); /* 画面幅に応じて可変 */
-      letter-spacing: 0.3em;
-      text-shadow: 0 0 10px #00ffcc, 0 0 30px #00ffcc;
-      margin: 6px 0 4px;
-    }
-
-    /* ===== スコア表示 ===== */
-    #hud {
+    body {
       display: flex;
-      gap: 32px;
-      margin-bottom: 6px;
-      font-size: clamp(0.7rem, 3.5vw, 0.95rem);
-      letter-spacing: 0.12em;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #f7f7f7;
     }
 
-    #hud span {
-      text-shadow: 0 0 6px #00ffcc;
-    }
-
-    /* ===== ゲームキャンバス ===== */
-    #gameCanvas {
-      border: 2px solid #00ffcc;
-      box-shadow: 0 0 20px #00ffcc55, 0 0 60px #00ffcc22;
-      background-color: #020b18;
-      display: block;
-      /* JS でサイズを動的に決定するので CSS での width/height は指定しない */
-      /* キャンバス上のタッチはスクロールさせない */
-      touch-action: none;
-    }
-
-    /* ===== バーチャルジョイスティック エリア ===== */
-    #joystickArea {
+    #gameContainer {
       position: relative;
-      width: 160px;
-      height: 160px;
-      margin-top: 14px;
-      flex-shrink: 0;
-      /* ジョイスティック上のタッチもスクロールさせない */
+      width: 100%;
+      max-width: 800px;
+      padding: 0 12px;
+    }
+
+    /* スコア表示エリア */
+    #scoreArea {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 20px;
+      padding: 0 4px 4px;
+      font-size: clamp(14px, 3vw, 18px);
+      color: #535353;
+      letter-spacing: 0.1em;
+      font-weight: bold;
+    }
+
+    #scoreArea span {
+      font-size: 0.75em;
+      color: #aaa;
+    }
+
+    /* ゲームキャンバス */
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      background: #f7f7f7;
+      border-bottom: 3px solid #535353;
       touch-action: none;
+      cursor: pointer;
     }
 
-    /* 外側リング */
-    /* inset: 0 は Safari 14以前で非対応なので top/right/bottom/left に展開 */
-    #joystickBase {
-      position: absolute;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      border-radius: 50%;
-      border: 2px solid #00ffcc44;
-      background: #00ffcc0a;
-    }
-
-    /* スティック（動く円） */
-    #joystickKnob {
-      position: absolute;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: #00ffcc33;
-      border: 2px solid #00ffcc;
-      box-shadow: 0 0 12px #00ffcc88;
-      /* 中央に配置 */
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      transition: none; /* 指を追随するので transition は不要 */
-    }
-
-    /* ===== オーバーレイ（スタート／ゲームオーバー画面）===== */
-    /* inset: 0 は Safari 14以前で非対応なので top/right/bottom/left に展開 */
+    /* オーバーレイ */
     #overlay {
       position: absolute;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      display: -webkit-flex; /* Safari 古いバージョン向け */
-      display: flex;
-      -webkit-flex-direction: column;
-      flex-direction: column;
-      -webkit-align-items: center;
-      align-items: center;
-      -webkit-justify-content: center;
-      justify-content: center;
-      gap: 14px;
-      background: #020b18cc;
-      /* キャンバスの上に重ねる */
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
       z-index: 10;
+      pointer-events: none;
     }
 
-    #overlay h2 {
-      font-size: clamp(1.4rem, 7vw, 2.4rem);
-      letter-spacing: 0.2em;
-      text-shadow: 0 0 15px #ff004c, 0 0 40px #ff004c;
-      color: #ff004c;
+    #overlayTitle {
+      font-size: clamp(18px, 4vw, 28px);
+      color: #535353;
+      letter-spacing: 0.15em;
+      font-weight: bold;
+      margin-bottom: 12px;
     }
 
-    #overlay p {
-      font-size: clamp(0.75rem, 3.5vw, 1rem);
-      letter-spacing: 0.08em;
-      color: #aaffee;
-      text-shadow: 0 0 6px #00ffcc;
-      text-align: center;
-      padding: 0 20px;
-    }
-
-    #overlay button {
-      margin-top: 8px;
-      padding: 14px 44px;
-      background: transparent;
-      border: 2px solid #00ffcc;
-      color: #00ffcc;
+    #overlayBtn {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 10px 28px;
+      border: 2px solid #535353;
+      color: #535353;
       font-family: 'Courier New', Courier, monospace;
-      font-size: clamp(0.9rem, 4vw, 1.1rem);
-      letter-spacing: 0.2em;
+      font-size: clamp(11px, 2.5vw, 15px);
+      letter-spacing: 0.15em;
+      font-weight: bold;
       cursor: pointer;
-      text-shadow: 0 0 6px #00ffcc;
-      box-shadow: 0 0 12px #00ffcc55;
-      /* タップ時のフィードバック */
-      transition: background 0.15s, box-shadow 0.15s;
+      pointer-events: all;
+      background: transparent;
+      transition: background 0.1s;
     }
 
-    #overlay button:active {
-      background: #00ffcc33;
-      box-shadow: 0 0 28px #00ffccaa;
+    #overlayBtn:active {
+      background: #ddd;
     }
 
-    .hidden {
-      display: none !important;
-    }
+    .hidden { display: none !important; }
 
-    /* ===== 操作説明（キーボードとタッチ両方を案内）===== */
-    #instructions {
-      margin-top: 8px;
-      font-size: clamp(0.6rem, 2.8vw, 0.75rem);
-      color: #335544;
-      letter-spacing: 0.06em;
+    /* 操作ヒント */
+    #hint {
+      margin-top: 10px;
+      font-size: clamp(10px, 2vw, 13px);
+      color: #aaa;
+      letter-spacing: 0.05em;
       text-align: center;
     }
 
-    /* ===== キャンバスとオーバーレイを包むラッパー ===== */
-    #gameWrapper {
-      position: relative; /* overlay の position: absolute の基点 */
-      flex-shrink: 0;
+    /* 夜モード */
+    body.night {
+      background: #1a1a2e;
     }
+    body.night #gameCanvas {
+      background: #1a1a2e;
+      border-bottom-color: #e0e0e0;
+    }
+    body.night #scoreArea { color: #e0e0e0; }
+    body.night #scoreArea span { color: #888; }
+    body.night #overlayTitle { color: #e0e0e0; }
+    body.night #overlayBtn { border-color: #e0e0e0; color: #e0e0e0; }
+    body.night #hint { color: #666; }
   </style>
 </head>
 <body>
 
-  <h1>⚡ VOID RUNNER ⚡</h1>
-
-  <!-- スコア / ハイスコア 表示エリア -->
-  <div id="hud">
-    <span>SCORE: <span id="scoreDisplay">0</span></span>
-    <span>BEST: <span id="bestDisplay">0</span></span>
-  </div>
-
-  <!-- キャンバスとオーバーレイをまとめるラッパー -->
-  <div id="gameWrapper">
-    <canvas id="gameCanvas"></canvas>
-
-    <!-- スタート／ゲームオーバー用オーバーレイ -->
-    <div id="overlay">
-      <h2 id="overlayTitle">VOID RUNNER</h2>
-      <p id="overlayMessage">WASDキー または 画面下のジョイスティックで移動して敵を避けろ！</p>
-      <p id="finalScore" class="hidden"></p>
-      <button id="startBtn" onclick="startGame()">[ START ]</button>
+  <div id="gameContainer">
+    <div id="scoreArea">
+      <span>HI</span><span id="hiDisplay">00000</span>
+      &nbsp;<span id="scoreDisplay">00000</span>
     </div>
+
+    <div style="position:relative;">
+      <canvas id="gameCanvas"></canvas>
+      <div id="overlay">
+        <div id="overlayTitle" class="hidden">GAME OVER</div>
+        <button id="overlayBtn" onclick="startGame()">[ START ]</button>
+      </div>
+    </div>
+
+    <p id="hint">スペース / 上矢印 / タップ でジャンプ &nbsp;|&nbsp; 下矢印 / 長押し でしゃがみ</p>
   </div>
 
-  <!-- バーチャルジョイスティック（タッチ操作用） -->
-  <div id="joystickArea">
-    <div id="joystickBase"></div>
-    <div id="joystickKnob"></div>
-  </div>
+<script>
+// ===== Canvas セットアップ =====
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
 
-  <p id="instructions">WASD: 移動（キーボード）&nbsp;|&nbsp; 下のジョイスティック（タッチ）</p>
+const LOGICAL_W = 800;
+const LOGICAL_H = 240;
+const GROUND_Y  = LOGICAL_H - 30;  // 地面Y座標
 
-  <script>
-    // ============================================================
-    //  定数・設定
-    // ============================================================
+canvas.width  = LOGICAL_W;
+canvas.height = LOGICAL_H;
 
-    const LOGICAL_W = 600;      // 論理キャンバス幅（ゲーム内座標系）
-    const LOGICAL_H = 500;      // 論理キャンバス高さ
-    const PLAYER_SIZE = 16;     // プレイヤーの半幅（正方形）
-    const PLAYER_SPEED = 3;     // プレイヤーの移動速度（px/フレーム）
-    const ENEMY_SIZE = 14;      // 敵の半幅
-    const ENEMY_BASE_SPEED = 1.5;
-    const ENEMY_SPAWN_INTERVAL = 90;
-    const MAX_ENEMIES = 30;
+function resizeCanvas() {
+  const container = document.getElementById('gameContainer');
+  const w = Math.min(container.clientWidth - 24, LOGICAL_W);
+  const scale = w / LOGICAL_W;
+  canvas.style.width  = w + 'px';
+  canvas.style.height = (LOGICAL_H * scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
-    // ============================================================
-    //  キャンバスのレスポンシブ対応
-    //  論理座標（600×500）を維持したまま、画面サイズに合わせてスケール
-    // ============================================================
+// ===== 色定義（昼/夜で変わる） =====
+let isNight = false;
+const COLOR = {
+  get fg()      { return isNight ? '#e0e0e0' : '#535353'; },
+  get bg()      { return isNight ? '#1a1a2e' : '#f7f7f7'; },
+  get ground()  { return isNight ? '#e0e0e0' : '#535353'; },
+  get cloud()   { return isNight ? '#444' : '#ccc'; },
+  get star()    { return '#fff'; },
+  get moon()    { return '#e0e0e0'; },
+};
 
-    const canvas  = document.getElementById('gameCanvas');
-    const ctx     = canvas.getContext('2d');
-    let canvasScale = 1; // 描画スケール倍率
+// ===== ゲーム状態 =====
+let state       = 'idle';   // 'idle' | 'playing' | 'over'
+let score       = 0;
+let hiScore     = 0;
+let speed       = 5;        // 地面スクロール速度 (px/frame)
+let frameCount  = 0;
+let animId      = null;
+let nightTimer  = 0;        // 夜モード切り替え用
 
-    function resizeCanvas() {
-      // 利用可能な幅を取得（余白を考慮して少し小さめに）
-      const maxW = Math.min(window.innerWidth - 8, LOGICAL_W);
-      // 縦方向は HUD + ジョイスティック + タイトル の高さを引く
-      const reservedH = 150; // タイトル・HUD・ジョイスティック等のための高さ
-      const maxH = Math.min(window.innerHeight - reservedH, LOGICAL_H);
+// ===== 地面ライン =====
+const GROUND_LINE_Y = GROUND_Y + 2;
 
-      // アスペクト比を保ったまま収まるスケールを計算
-      canvasScale = Math.min(maxW / LOGICAL_W, maxH / LOGICAL_H);
+// ===== 恐竜 =====
+const dino = {
+  x: 80,
+  y: GROUND_Y,
+  w: 44,
+  h: 48,
+  vy: 0,
+  jumping: false,
+  ducking: false,
+  dead: false,
+  legPhase: 0,   // 走りアニメ用
+};
 
-      const displayW = Math.floor(LOGICAL_W * canvasScale);
-      const displayH = Math.floor(LOGICAL_H * canvasScale);
+const DINO_DUCK_H = 28;
+const GRAVITY     = 0.8;
+const JUMP_VY     = -16;
 
-      // CSS でのサイズ（実際の表示サイズ）
-      canvas.style.width  = displayW + 'px';
-      canvas.style.height = displayH + 'px';
+function resetDino() {
+  dino.y       = GROUND_Y;
+  dino.vy      = 0;
+  dino.jumping = false;
+  dino.ducking = false;
+  dino.dead    = false;
+  dino.legPhase = 0;
+}
 
-      // canvas 属性は論理サイズ（ゲーム座標系）のまま維持
-      canvas.width  = LOGICAL_W;
-      canvas.height = LOGICAL_H;
+// ===== 障害物 =====
+let obstacles = [];
+let nextObstacleIn = 90; // frames
 
-      // ゲームラッパーのサイズも同期
-      document.getElementById('gameWrapper').style.width  = displayW + 'px';
-      document.getElementById('gameWrapper').style.height = displayH + 'px';
-    }
+const CACTUS_TYPES = [
+  { w: 17, h: 35, count: 1 },
+  { w: 17, h: 50, count: 1 },
+  { w: 34, h: 35, count: 2 },
+  { w: 51, h: 35, count: 3 },
+  { w: 34, h: 50, count: 2 },
+];
 
-    // 画面回転・リサイズ時にも再計算
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas(); // 初回実行
+function spawnObstacle() {
+  const minGap = Math.max(60, 200 - speed * 8);
+  nextObstacleIn = Math.floor(minGap + Math.random() * 120);
 
-    // ============================================================
-    //  変数
-    // ============================================================
+  // 一定速度以上になったらプテラノドンも出現
+  const canBird = speed > 8;
+  const isBird  = canBird && Math.random() < 0.3;
 
-    let player   = {};
-    let enemies  = [];
-    let score    = 0;
-    let bestScore = 0;
-    let frameCount  = 0;
-    let gameRunning = false;
-    let animId      = null;
+  if (isBird) {
+    // プテラノドン（飛行障害物）
+    const altitudes = [GROUND_Y - 20, GROUND_Y - 50, GROUND_Y - 80];
+    const birdY = altitudes[Math.floor(Math.random() * altitudes.length)];
+    obstacles.push({ type: 'bird', x: LOGICAL_W + 20, y: birdY, w: 46, h: 36, wingPhase: 0 });
+  } else {
+    // サボテン
+    const t = CACTUS_TYPES[Math.floor(Math.random() * CACTUS_TYPES.length)];
+    obstacles.push({ type: 'cactus', x: LOGICAL_W + 10, y: GROUND_Y, w: t.w, h: t.h, count: t.count });
+  }
+}
 
-    // ============================================================
-    //  キーボード入力（PCでも遊べるように維持）
-    // ============================================================
+// ===== 雲・星 =====
+let clouds = [];
+let stars  = [];
+let moon   = { x: LOGICAL_W + 40, phase: 0 };
 
-    const keys = { w: false, a: false, s: false, d: false };
-
-    document.addEventListener('keydown', (e) => {
-      const k = e.key.toLowerCase();
-      if (k in keys) keys[k] = true;
+function initClouds() {
+  clouds = [];
+  for (let i = 0; i < 4; i++) {
+    clouds.push({
+      x: Math.random() * LOGICAL_W,
+      y: 20 + Math.random() * 50,
+      w: 60 + Math.random() * 60,
     });
-    document.addEventListener('keyup', (e) => {
-      const k = e.key.toLowerCase();
-      if (k in keys) keys[k] = false;
-    });
+  }
+}
 
-    // ============================================================
-    //  バーチャルジョイスティック（タッチ操作）
-    // ============================================================
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 50; i++) {
+    stars.push({ x: Math.random() * LOGICAL_W, y: Math.random() * (GROUND_Y - 10), r: Math.random() < 0.3 ? 1.5 : 1 });
+  }
+}
 
-    const joystickArea = document.getElementById('joystickArea');
-    const joystickKnob = document.getElementById('joystickKnob');
+initClouds();
+initStars();
 
-    // スティックの傾き量（-1.0 〜 1.0 の正規化済み値）
-    let joystickDelta = { x: 0, y: 0 };
+// ===== 地面テクスチャ点 =====
+let groundDots = [];
+function initGround() {
+  groundDots = [];
+  for (let i = 0; i < 80; i++) {
+    groundDots.push({ x: Math.random() * LOGICAL_W * 2, size: Math.random() < 0.3 ? 2 : 1 });
+  }
+}
+initGround();
 
-    // ジョイスティックエリアの中心を取得
-    function getJoystickCenter() {
-      const rect = joystickArea.getBoundingClientRect();
-      return {
-        cx: rect.left + rect.width / 2,
-        cy: rect.top  + rect.height / 2,
-        r:  rect.width / 2,  // 有効半径
-      };
+// ===== 入力 =====
+const input = { jump: false, duck: false };
+let jumpPressed = false;
+let duckPressed = false;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === ' ' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!jumpPressed) { input.jump = true; jumpPressed = true; }
+    if (state === 'idle' || state === 'over') startGame();
+  }
+  if (e.key === 'ArrowDown') { e.preventDefault(); input.duck = true; duckPressed = true; }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === ' ' || e.key === 'ArrowUp') { jumpPressed = false; input.jump = false; }
+  if (e.key === 'ArrowDown') { duckPressed = false; input.duck = false; }
+});
+
+// タッチ操作
+let touchStartY = 0;
+let touchHoldTimer = null;
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  touchStartY = e.touches[0].clientY;
+  touchHoldTimer = setTimeout(() => { input.duck = true; }, 150);
+  if (state === 'idle' || state === 'over') { startGame(); return; }
+  if (!jumpPressed) { input.jump = true; jumpPressed = true; }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  clearTimeout(touchHoldTimer);
+  jumpPressed  = false;
+  input.jump   = false;
+  input.duck   = false;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+
+// ===== ゲーム開始 =====
+function startGame() {
+  if (state === 'playing') return;
+  state      = 'playing';
+  score      = 0;
+  speed      = 5;
+  frameCount = 0;
+  nightTimer = 0;
+  isNight    = false;
+  document.body.classList.remove('night');
+
+  obstacles        = [];
+  nextObstacleIn   = 90;
+  initClouds();
+  moon.x = LOGICAL_W + 40;
+  moon.phase = 0;
+
+  resetDino();
+
+  document.getElementById('overlayTitle').classList.add('hidden');
+  document.getElementById('overlayBtn').classList.add('hidden');
+  document.getElementById('overlayBtn').textContent = '[ RETRY ]';
+
+  if (animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(loop);
+}
+
+// ===== ゲームオーバー =====
+function triggerGameOver() {
+  state = 'over';
+  if (score > hiScore) hiScore = score;
+  updateHUD();
+  document.getElementById('overlayTitle').classList.remove('hidden');
+  document.getElementById('overlayBtn').classList.remove('hidden');
+}
+
+// ===== HUD 更新 =====
+function updateHUD() {
+  document.getElementById('scoreDisplay').textContent = String(Math.floor(score)).padStart(5, '0');
+  document.getElementById('hiDisplay').textContent    = String(hiScore).padStart(5, '0');
+}
+
+// ===== 衝突判定 =====
+function hitTest(obs) {
+  const margin = 6;
+  const dx = obs.type === 'cactus' ? margin + 2 : margin;
+  const dinoH = dino.ducking ? DINO_DUCK_H : dino.h;
+
+  const dinoLeft   = dino.x - dino.w / 2 + dx;
+  const dinoRight  = dino.x + dino.w / 2 - dx;
+  const dinoTop    = dino.y - dinoH + margin;
+  const dinoBottom = dino.y - margin;
+
+  const obsLeft  = obs.x + dx;
+  const obsRight = obs.x + obs.w - dx;
+  const obsTop   = obs.y - obs.h + margin;
+  const obsBottom = obs.y;
+
+  return dinoLeft < obsRight && dinoRight > obsLeft &&
+         dinoTop  < obsBottom && dinoBottom > obsTop;
+}
+
+// ===== 描画: 恐竜 =====
+function drawDino(dead) {
+  const c = COLOR.fg;
+  const x = dino.x;
+  const y = dino.y;
+  const ph = dino.legPhase;
+
+  ctx.fillStyle = c;
+
+  if (dino.ducking) {
+    // しゃがみ形状
+    // 胴体（横長）
+    ctx.fillRect(x - 22, y - 24, 44, 18);
+    // 頭
+    ctx.fillRect(x + 8,  y - 28, 18, 12);
+    // 目
+    ctx.fillStyle = COLOR.bg;
+    ctx.fillRect(x + 21, y - 26, 4, 4);
+    ctx.fillStyle = c;
+    // 脚
+    drawDinoLegs(x, y, ph, true);
+    // 尻尾
+    ctx.fillRect(x - 24, y - 20, 8, 6);
+  } else {
+    // 通常形状
+    // 胴体
+    ctx.fillRect(x - 18, y - 40, 36, 26);
+    // 首・頭
+    ctx.fillRect(x - 2,  y - 52, 22, 18);
+    // 口（くちばし）
+    ctx.fillRect(x + 16, y - 44, 8,  6);
+    // 目
+    ctx.fillStyle = COLOR.bg;
+    if (dead) {
+      // ×目
+      ctx.fillStyle = c;
+      ctx.fillRect(x + 4, y - 50, 4, 4);
+      ctx.fillRect(x + 8, y - 46, 4, 4);
+      ctx.fillRect(x + 4, y - 46, 4, 4);
+      ctx.fillRect(x + 8, y - 50, 4, 4);
+    } else {
+      ctx.fillRect(x + 6, y - 48, 5, 5);
     }
+    ctx.fillStyle = c;
+    // 腕（小さな突起）
+    ctx.fillRect(x - 2, y - 30, 10, 6);
+    // 尻尾
+    ctx.fillRect(x - 26, y - 36, 14, 8);
+    ctx.fillRect(x - 30, y - 28, 8,  6);
+    // 脚
+    drawDinoLegs(x, y, ph, false);
+  }
+}
 
-    // スティックの見た目と joystickDelta を更新
-    function updateJoystick(touchX, touchY) {
-      const { cx, cy, r } = getJoystickCenter();
-      const maxKnobTravel = r * 0.65; // スティックが動ける最大距離
+function drawDinoLegs(x, y, ph, ducking) {
+  const c = COLOR.fg;
+  ctx.fillStyle = c;
+  if (ducking) {
+    ctx.fillRect(x - 6,  y - 8, 8, 8);
+    ctx.fillRect(x + 4,  y - 8, 8, 8);
+    // 足先
+    ctx.fillRect(x - 10, y - 4, 8, 4);
+    ctx.fillRect(x + 8,  y - 4, 8, 4);
+    return;
+  }
+  // 走りアニメーション（2フレーム）
+  if (dino.jumping) {
+    // ジャンプ中は両脚を後ろに
+    ctx.fillRect(x - 12, y - 16, 8, 16);
+    ctx.fillRect(x + 4,  y - 12, 8, 12);
+  } else if (ph === 0) {
+    // 脚A
+    ctx.fillRect(x - 12, y - 14, 8, 14);
+    ctx.fillRect(x + 4,  y - 10, 8, 10);
+    ctx.fillRect(x - 14, y - 4,  8, 4);  // 足先
+  } else {
+    // 脚B
+    ctx.fillRect(x - 12, y - 10, 8, 10);
+    ctx.fillRect(x + 4,  y - 14, 8, 14);
+    ctx.fillRect(x + 4,  y - 4,  8, 4);  // 足先
+  }
+}
 
-      let dx = touchX - cx;
-      let dy = touchY - cy;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+// ===== 描画: サボテン =====
+function drawCactus(obs) {
+  const c = COLOR.fg;
+  ctx.fillStyle = c;
+  const x = obs.x;
+  const y = obs.y;
+  const count = obs.count;
+  const baseW = 17;
 
-      // 外周を超えないようにクランプ
-      if (dist > maxKnobTravel) {
-        dx = (dx / dist) * maxKnobTravel;
-        dy = (dy / dist) * maxKnobTravel;
-      }
-
-      // CSS で位置を更新（中心からのオフセット）
-      joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-
-      // 正規化（-1 〜 1）
-      joystickDelta.x = dx / maxKnobTravel;
-      joystickDelta.y = dy / maxKnobTravel;
+  for (let i = 0; i < count; i++) {
+    const cx = x + i * (baseW + 0);
+    // 幹
+    ctx.fillRect(cx + 5, y - obs.h, 7, obs.h);
+    // トゲ上部
+    ctx.fillRect(cx + 2, y - obs.h + 4, 13, 5);
+    // 左腕
+    if (count === 1 || i === 0) {
+      ctx.fillRect(cx,     y - obs.h + 12, 5, obs.h * 0.4);
+      ctx.fillRect(cx,     y - obs.h + 8,  6, 6);
     }
-
-    // スティックをリセット（中央に戻す）
-    function resetJoystick() {
-      joystickKnob.style.transform = 'translate(-50%, -50%)';
-      joystickDelta.x = 0;
-      joystickDelta.y = 0;
+    // 右腕
+    if (count === 1 || i === count - 1) {
+      ctx.fillRect(cx + 12, y - obs.h + 12, 5, obs.h * 0.4);
+      ctx.fillRect(cx + 11, y - obs.h + 8,  6, 6);
     }
+  }
+}
 
-    // ジョイスティックのタッチ開始
-    joystickArea.addEventListener('touchstart', (e) => {
-      e.preventDefault(); // スクロール防止
-      const t = e.touches[0];
-      updateJoystick(t.clientX, t.clientY);
-    }, { passive: false });
+// ===== 描画: プテラノドン =====
+function drawBird(obs) {
+  const c = COLOR.fg;
+  ctx.fillStyle = c;
+  const x = obs.x;
+  const y = obs.y;
+  const wp = obs.wingPhase; // 0 or 1
 
-    // ジョイスティックのタッチ移動
-    joystickArea.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const t = e.touches[0];
-      updateJoystick(t.clientX, t.clientY);
-    }, { passive: false });
+  // 胴体
+  ctx.fillRect(x + 14, y - 14, 22, 10);
+  // 頭
+  ctx.fillRect(x + 32, y - 20, 14, 10);
+  // くちばし
+  ctx.fillRect(x + 44, y - 18, 10, 4);
+  // 目
+  ctx.fillStyle = COLOR.bg;
+  ctx.fillRect(x + 38, y - 18, 4, 4);
+  ctx.fillStyle = c;
 
-    // ジョイスティックのタッチ終了
-    joystickArea.addEventListener('touchend',   (e) => { e.preventDefault(); resetJoystick(); }, { passive: false });
-    joystickArea.addEventListener('touchcancel',(e) => { e.preventDefault(); resetJoystick(); }, { passive: false });
+  if (wp === 0) {
+    // 翼を上げた状態
+    ctx.fillRect(x,     y - 26, 36, 8);
+    ctx.fillRect(x + 4, y - 30, 24, 6);
+  } else {
+    // 翼を下げた状態
+    ctx.fillRect(x,     y - 10, 36, 8);
+    ctx.fillRect(x + 4, y - 6,  24, 6);
+  }
+}
 
-    // キャンバス全体のスクロール・コンテキストメニューを防ぐ
-    canvas.addEventListener('touchstart',  (e) => e.preventDefault(), { passive: false });
-    canvas.addEventListener('touchmove',   (e) => e.preventDefault(), { passive: false });
-    document.addEventListener('contextmenu',(e) => e.preventDefault());
-
-    // ============================================================
-    //  ゲーム初期化
-    // ============================================================
-
-    function startGame() {
-      document.getElementById('overlay').classList.add('hidden');
-
-      player = { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
-
-      enemies    = [];
-      score      = 0;
-      frameCount = 0;
-      gameRunning = true;
-
-      updateHUD();
-
-      if (animId) cancelAnimationFrame(animId);
-      gameLoop();
+// ===== 描画: 地面 =====
+function drawGround(offset) {
+  ctx.fillStyle = COLOR.ground;
+  ctx.fillRect(0, GROUND_LINE_Y, LOGICAL_W, 3);
+  // 石ころ
+  ctx.fillStyle = COLOR.ground;
+  for (const d of groundDots) {
+    const rx = ((d.x - offset * 0.8) % (LOGICAL_W * 2) + LOGICAL_W * 2) % (LOGICAL_W * 2);
+    if (rx < LOGICAL_W) {
+      ctx.fillRect(rx, GROUND_LINE_Y + 4 + (d.size === 2 ? 0 : 2), d.size * 2, d.size);
     }
+  }
+}
 
-    // ============================================================
-    //  敵の生成
-    // ============================================================
+// ===== 描画: 雲 =====
+function drawClouds(offset) {
+  ctx.fillStyle = COLOR.cloud;
+  for (const cl of clouds) {
+    const rx = ((cl.x - offset * 0.3) % (LOGICAL_W + 120) + (LOGICAL_W + 120)) % (LOGICAL_W + 120) - 60;
+    const w = cl.w, h = 18;
+    // 雲の形（矩形の組み合わせ）
+    ctx.fillRect(rx,          cl.y,     w,       h);
+    ctx.fillRect(rx + w * 0.1, cl.y - 8, w * 0.5, 10);
+    ctx.fillRect(rx + w * 0.45, cl.y - 12, w * 0.4, 14);
+  }
+}
 
-    function spawnEnemy() {
-      const side = Math.floor(Math.random() * 4);
-      let ex, ey;
-
-      if      (side === 0) { ex = Math.random() * LOGICAL_W; ey = -ENEMY_SIZE; }
-      else if (side === 1) { ex = LOGICAL_W + ENEMY_SIZE;    ey = Math.random() * LOGICAL_H; }
-      else if (side === 2) { ex = Math.random() * LOGICAL_W; ey = LOGICAL_H + ENEMY_SIZE; }
-      else                 { ex = -ENEMY_SIZE;               ey = Math.random() * LOGICAL_H; }
-
-      const speedBonus = Math.min(score / 300, 2.5);
-      const speed = ENEMY_BASE_SPEED + speedBonus + (Math.random() - 0.5) * 0.8;
-      const angle = Math.atan2(player.y - ey, player.x - ex);
-
-      enemies.push({ x: ex, y: ey, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed });
+// ===== 描画: 夜空 =====
+function drawNight(offset) {
+  // 星
+  for (const s of stars) {
+    const rx = ((s.x - offset * 0.1) % (LOGICAL_W + 40) + (LOGICAL_W + 40)) % (LOGICAL_W + 40) - 20;
+    if (rx >= 0 && rx < LOGICAL_W) {
+      ctx.fillStyle = COLOR.star;
+      ctx.fillRect(rx - s.r, s.y - s.r, s.r * 2, s.r * 2);
     }
+  }
+  // 月
+  const mx = ((moon.x - offset * 0.05) % (LOGICAL_W * 3) + LOGICAL_W * 3) % (LOGICAL_W * 3);
+  if (mx < LOGICAL_W + 40) {
+    ctx.fillStyle = COLOR.moon;
+    // 月（欠けた形）
+    ctx.beginPath();
+    ctx.arc(mx, 40, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = isNight ? '#1a1a2e' : '#f7f7f7';
+    ctx.beginPath();
+    ctx.arc(mx + 8, 36, 15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
 
-    // ============================================================
-    //  衝突判定（AABB）
-    // ============================================================
+// ===== 描画: スコア（キャンバス外・DOM側は更新済み） =====
 
-    function checkCollision(a, aSize, b, bSize) {
-      return Math.abs(a.x - b.x) < aSize + bSize &&
-             Math.abs(a.y - b.y) < aSize + bSize;
+// ===== メインループ =====
+let scrollOffset = 0;
+
+function loop() {
+  if (state !== 'playing') return;
+
+  frameCount++;
+  scrollOffset += speed;
+
+  // スコア更新（7フレームごとに+1）
+  score = Math.floor(frameCount / 7);
+
+  // 速度アップ（徐々に加速）
+  speed = 5 + score * 0.004;
+  speed = Math.min(speed, 14);
+
+  // 夜モード切り替え（500点ごと）
+  nightTimer++;
+  if (nightTimer >= 700) {
+    nightTimer = 0;
+    isNight = !isNight;
+    document.body.classList.toggle('night', isNight);
+  }
+
+  // ジャンプ
+  if (input.jump && !dino.jumping && !dino.ducking) {
+    dino.vy      = JUMP_VY;
+    dino.jumping = true;
+    input.jump   = false;
+  }
+
+  // しゃがみ
+  dino.ducking = input.duck && !dino.jumping;
+
+  // 重力
+  if (dino.jumping || dino.y < GROUND_Y) {
+    dino.vy += GRAVITY;
+    dino.y  += dino.vy;
+    if (dino.y >= GROUND_Y) {
+      dino.y       = GROUND_Y;
+      dino.vy      = 0;
+      dino.jumping = false;
     }
+  }
 
-    // ============================================================
-    //  プレイヤーの更新（キーボード + ジョイスティック）
-    // ============================================================
+  // 走りアニメ
+  if (!dino.jumping) {
+    dino.legPhase = Math.floor(frameCount / 6) % 2;
+  }
 
-    function updatePlayer() {
-      // キーボード入力
-      if (keys.w) player.y -= PLAYER_SPEED;
-      if (keys.s) player.y += PLAYER_SPEED;
-      if (keys.a) player.x -= PLAYER_SPEED;
-      if (keys.d) player.x += PLAYER_SPEED;
+  // 障害物生成
+  nextObstacleIn--;
+  if (nextObstacleIn <= 0) spawnObstacle();
 
-      // ジョイスティック入力（キーボードと合算可能）
-      // joystickDelta は -1〜1 なので PLAYER_SPEED を掛けて速度に変換
-      player.x += joystickDelta.x * PLAYER_SPEED;
-      player.y += joystickDelta.y * PLAYER_SPEED;
-
-      // 画面外クランプ
-      player.x = Math.max(PLAYER_SIZE, Math.min(LOGICAL_W - PLAYER_SIZE, player.x));
-      player.y = Math.max(PLAYER_SIZE, Math.min(LOGICAL_H - PLAYER_SIZE, player.y));
+  // 障害物移動
+  for (const obs of obstacles) {
+    obs.x -= speed;
+    if (obs.type === 'bird') {
+      obs.wingPhase = Math.floor(frameCount / 10) % 2;
     }
+  }
+  obstacles = obstacles.filter(o => o.x + o.w + 10 > 0);
 
-    // ============================================================
-    //  敵の更新
-    // ============================================================
-
-    function updateEnemies() {
-      for (const e of enemies) {
-        e.x += e.vx;
-        e.y += e.vy;
-      }
-      const margin = 100;
-      enemies = enemies.filter(
-        e => e.x > -margin && e.x < LOGICAL_W + margin &&
-             e.y > -margin && e.y < LOGICAL_H + margin
-      );
+  // 衝突判定
+  for (const obs of obstacles) {
+    if (hitTest(obs)) {
+      dino.dead = true;
+      draw(true);
+      triggerGameOver();
+      return;
     }
+  }
 
-    // ============================================================
-    //  描画処理（論理座標で描く → CSS スケールで拡縮される）
-    // ============================================================
+  draw(false);
+  updateHUD();
 
-    function draw() {
-      ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+  // スコア100ごとにフラッシュ演出
+  if (score > 0 && score % 100 === 0 && frameCount % 7 === 0) {
+    // HUD点滅（軽い演出）
+    const el = document.getElementById('scoreDisplay');
+    el.style.visibility = 'hidden';
+    setTimeout(() => { el.style.visibility = 'visible'; }, 80);
+    setTimeout(() => { el.style.visibility = 'hidden'; }, 160);
+    setTimeout(() => { el.style.visibility = 'visible'; }, 240);
+  }
 
-      // 背景
-      ctx.fillStyle = '#020b18';
-      ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+  animId = requestAnimationFrame(loop);
+}
 
-      // グリッドライン
-      ctx.strokeStyle = '#0a2030';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < LOGICAL_W; x += 40) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, LOGICAL_H); ctx.stroke();
-      }
-      for (let y = 0; y < LOGICAL_H; y += 40) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(LOGICAL_W, y); ctx.stroke();
-      }
+// ===== 描画 =====
+function draw(dead) {
+  // 背景クリア
+  ctx.fillStyle = COLOR.bg;
+  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
-      // 敵を描画
-      for (const e of enemies) {
-        ctx.shadowColor = '#ff004c';
-        ctx.shadowBlur  = 12;
-        ctx.fillStyle   = '#ff004c';
-        ctx.fillRect(e.x - ENEMY_SIZE, e.y - ENEMY_SIZE, ENEMY_SIZE * 2, ENEMY_SIZE * 2);
-        ctx.shadowBlur  = 0;
-        ctx.fillStyle   = '#ff88aa';
-        ctx.fillRect(e.x - ENEMY_SIZE / 2, e.y - ENEMY_SIZE / 2, ENEMY_SIZE, ENEMY_SIZE);
-      }
+  if (isNight) drawNight(scrollOffset);
+  drawClouds(scrollOffset);
+  drawGround(scrollOffset);
 
-      // プレイヤーを描画
-      ctx.shadowColor = '#00ffcc';
-      ctx.shadowBlur  = 20;
-      ctx.fillStyle   = '#00ffcc';
-      ctx.fillRect(player.x - PLAYER_SIZE, player.y - PLAYER_SIZE, PLAYER_SIZE * 2, PLAYER_SIZE * 2);
-      ctx.shadowBlur  = 0;
-      ctx.fillStyle   = '#ffffff';
-      ctx.fillRect(player.x - PLAYER_SIZE / 2, player.y - PLAYER_SIZE / 2, PLAYER_SIZE, PLAYER_SIZE);
+  // 障害物
+  for (const obs of obstacles) {
+    if (obs.type === 'cactus') drawCactus(obs);
+    else drawBird(obs);
+  }
 
-      ctx.shadowBlur = 0;
-    }
+  // 恐竜
+  drawDino(dead);
+}
 
-    // ============================================================
-    //  HUD 更新
-    // ============================================================
+// ===== 初期描画 =====
+(function init() {
+  ctx.fillStyle = COLOR.bg;
+  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+  drawGround(0);
+  drawDino(false);
+  updateHUD();
+})();
 
-    function updateHUD() {
-      document.getElementById('scoreDisplay').textContent = score;
-      document.getElementById('bestDisplay').textContent  = bestScore;
-    }
-
-    // ============================================================
-    //  ゲームオーバー
-    // ============================================================
-
-    function gameOver() {
-      gameRunning = false;
-      cancelAnimationFrame(animId);
-      resetJoystick();
-
-      if (score > bestScore) bestScore = score;
-      updateHUD();
-
-      document.getElementById('overlayTitle').textContent   = '- GAME OVER -';
-      document.getElementById('overlayMessage').textContent = '敵に当たってしまった...';
-      document.getElementById('finalScore').textContent     = `SCORE: ${score}`;
-      document.getElementById('finalScore').classList.remove('hidden');
-      document.getElementById('startBtn').textContent       = '[ RETRY ]';
-      document.getElementById('overlay').classList.remove('hidden');
-    }
-
-    // ============================================================
-    //  メインゲームループ
-    // ============================================================
-
-    function gameLoop() {
-      if (!gameRunning) return;
-
-      frameCount++;
-
-      updatePlayer();
-
-      if (frameCount % ENEMY_SPAWN_INTERVAL === 0 && enemies.length < MAX_ENEMIES) {
-        spawnEnemy();
-      }
-
-      updateEnemies();
-
-      for (const e of enemies) {
-        if (checkCollision(player, PLAYER_SIZE, e, ENEMY_SIZE)) {
-          gameOver();
-          return;
-        }
-      }
-
-      score = Math.floor(frameCount / 3);
-      updateHUD();
-      draw();
-
-      animId = requestAnimationFrame(gameLoop);
-    }
-
-    // ============================================================
-    //  初期描画（タイトル画面用）
-    // ============================================================
-    (function initialDraw() {
-      ctx.fillStyle = '#020b18';
-      ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-      ctx.strokeStyle = '#0a2030';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < LOGICAL_W; x += 40) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, LOGICAL_H); ctx.stroke();
-      }
-      for (let y = 0; y < LOGICAL_H; y += 40) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(LOGICAL_W, y); ctx.stroke();
-      }
-    })();
-
-  </script>
+</script>
 </body>
 </html>
